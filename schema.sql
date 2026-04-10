@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- (existing tables...)
 CREATE TABLE IF NOT EXISTS asset_categories (
     id VARCHAR(50) PRIMARY KEY,
