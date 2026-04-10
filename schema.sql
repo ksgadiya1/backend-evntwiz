@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS maps (
     grid_size DECIMAL(10, 2) DEFAULT 10,
     layers JSONB,
     settings JSONB,
+    map_data JSONB, -- Consolidated map data (zones, assets, lines, annotations)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

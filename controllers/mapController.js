@@ -11,66 +11,26 @@ exports.saveMap = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Create Map
+        const mapData = { zones, assets, lines, annotations };
+
+        // Create Map with consolidated map_data
         const mapRes = await client.query(
-            'INSERT INTO maps (name, event_type, center_lat, center_lng, zoom, measurement_unit, grid_enabled, grid_size, layers, settings) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id',
-            [name || 'Untitled Map', eventType || 'festival', center_lat || 0, center_lng || 0, zoom || 14, measurementUnit || 'meters', grid_enabled || false, grid_size || 10, layers || null, settings || null]
+            'INSERT INTO maps (name, event_type, center_lat, center_lng, zoom, measurement_unit, grid_enabled, grid_size, layers, settings, map_data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id',
+            [
+                name || 'Untitled Map',
+                eventType || 'festival',
+                center_lat || 0,
+                center_lng || 0,
+                Math.round(zoom || 14),
+                measurementUnit || 'meters',
+                grid_enabled || false,
+                grid_size || 10,
+                JSON.stringify(layers || {}),
+                JSON.stringify(settings || {}),
+                JSON.stringify(mapData)
+            ]
         );
         const mapId = mapRes.rows[0].id;
-
-        // Create Zones
-        if (zones && zones.length > 0) {
-            for (const zone of zones) {
-                await client.query(
-                    'INSERT INTO zones (id, map_id, name, type, color, fill_opacity, path, status, visible, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-                    [zone.id, mapId, zone.name, zone.zoneType?.id || zone.type, zone.color, zone.fillOpacity || 0.2, JSON.stringify(zone.path), zone.status, zone.visible !== false, JSON.stringify(zone.metadata || {})]
-                );
-            }
-        }
-
-        // Create Assets
-        if (assets && assets.length > 0) {
-            for (const asset of assets) {
-                await client.query(
-                    'INSERT INTO map_assets (id, map_id, zone_id, asset_def_id, name, lat, lng, x, y, rotation, width, length, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)',
-                    [
-                        asset.id,
-                        mapId,
-                        asset.parentId,
-                        asset.assetDefId || asset.assetDef?.id || asset.id.split('_')[0],
-                        asset.name,
-                        asset.lat,
-                        asset.lng,
-                        asset.x,
-                        asset.y,
-                        asset.rotationDeg || asset.rotation || 0,
-                        asset.widthM || asset.width,
-                        asset.lengthM || asset.length,
-                        JSON.stringify(asset) // Store the whole object in metadata for safety
-                    ]
-                );
-            }
-        }
-
-        // Create Lines
-        if (lines && lines.length > 0) {
-            for (const line of lines) {
-                await client.query(
-                    'INSERT INTO map_lines (id, map_id, parentId, name, path, color, weight, pattern) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-                    [line.id, mapId, line.parentId, line.name, JSON.stringify(line.path), line.color, line.weight, line.pattern]
-                );
-            }
-        }
-
-        // Create Annotations
-        if (annotations && annotations.length > 0) {
-            for (const ann of annotations) {
-                await client.query(
-                    'INSERT INTO map_annotations (id, map_id, parentId, text, lat, lng, style) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-                    [ann.id, mapId, ann.parentId, ann.text, ann.lat, ann.lng, JSON.stringify(ann.style || {})]
-                );
-            }
-        }
 
         await client.query('COMMIT');
         res.status(201).json({ success: true, id: mapId, message: 'Map saved successfully' });
@@ -95,132 +55,34 @@ exports.updateMap = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Update Map
+        const mapData = { zones, assets, lines, annotations };
+
+        // Update Map with consolidated map_data
         const updateRes = await client.query(
-            'UPDATE maps SET name = $1, event_type = $2, center_lat = $3, center_lng = $4, zoom = $5, measurement_unit = $6, grid_enabled = $7, grid_size = $8, layers = $9, settings = $10, updated_at = CURRENT_TIMESTAMP WHERE id = $11',
-            [name, eventType || 'festival', center_lat || 0, center_lng || 0, zoom || 14, measurementUnit || 'meters', grid_enabled || false, grid_size || 10, layers || null, settings || null, id]
+            `UPDATE maps SET 
+                name = $1, event_type = $2, center_lat = $3, center_lng = $4, zoom = $5, 
+                measurement_unit = $6, grid_enabled = $7, grid_size = $8, 
+                layers = $9, settings = $10, map_data = $11,
+                updated_at = CURRENT_TIMESTAMP 
+             WHERE id = $12`,
+            [
+                name,
+                eventType || 'festival',
+                center_lat || 0,
+                center_lng || 0,
+                Math.round(zoom || 14),
+                measurementUnit || 'meters',
+                grid_enabled || false,
+                grid_size || 10,
+                JSON.stringify(layers || {}),
+                JSON.stringify(settings || {}),
+                JSON.stringify(mapData),
+                id
+            ]
         );
 
         if (updateRes.rowCount === 0) {
-            console.error(`Map with ID ${id} not found for update!`);
             throw new Error(`Map with ID ${id} not found`);
-        }
-
-        // ── Upsert zones ──
-        const incomingZoneIds = (zones || []).map(z => z.id).filter(Boolean);
-        if (incomingZoneIds.length > 0) {
-            // Delete assets whose parent zone is about to be removed (FK constraint)
-            await client.query(
-                `DELETE FROM map_assets WHERE map_id = $1 AND zone_id IS NOT NULL AND zone_id NOT IN (${incomingZoneIds.map((_, i) => `$${i + 2}`).join(',')})`,
-                [id, ...incomingZoneIds]
-            );
-            // Remove zones no longer in the payload
-            await client.query(
-                `DELETE FROM zones WHERE map_id = $1 AND id NOT IN (${incomingZoneIds.map((_, i) => `$${i + 2}`).join(',')})`,
-                [id, ...incomingZoneIds]
-            );
-        } else {
-            // No zones in payload — remove all
-            await client.query('DELETE FROM map_assets WHERE map_id = $1 AND zone_id IS NOT NULL', [id]);
-            await client.query('DELETE FROM zones WHERE map_id = $1', [id]);
-        }
-
-        if (zones && zones.length > 0) {
-            for (const zone of zones) {
-                await client.query(
-                    `INSERT INTO zones (id, map_id, name, type, color, fill_opacity, path, status, visible, metadata)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                     ON CONFLICT (id) DO UPDATE SET
-                       name = EXCLUDED.name, type = EXCLUDED.type, color = EXCLUDED.color,
-                       fill_opacity = EXCLUDED.fill_opacity, path = EXCLUDED.path,
-                       status = EXCLUDED.status, visible = EXCLUDED.visible,
-                       metadata = EXCLUDED.metadata, updated_at = CURRENT_TIMESTAMP`,
-                    [zone.id, id, zone.name, zone.zoneType?.id || zone.type, zone.color, zone.fillOpacity || 0.2, JSON.stringify(zone.path), zone.status, zone.visible !== false, JSON.stringify(zone.metadata || {})]
-                );
-            }
-        }
-
-        // ── Upsert assets ──
-        const incomingAssetIds = (assets || []).map(a => a.id).filter(Boolean);
-        if (incomingAssetIds.length > 0) {
-            await client.query(
-                `DELETE FROM map_assets WHERE map_id = $1 AND id NOT IN (${incomingAssetIds.map((_, i) => `$${i + 2}`).join(',')})`,
-                [id, ...incomingAssetIds]
-            );
-        } else {
-            await client.query('DELETE FROM map_assets WHERE map_id = $1', [id]);
-        }
-
-        if (assets && assets.length > 0) {
-            for (const asset of assets) {
-                await client.query(
-                    `INSERT INTO map_assets (id, map_id, zone_id, asset_def_id, name, lat, lng, x, y, rotation, width, length, metadata)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                     ON CONFLICT (id) DO UPDATE SET
-                       zone_id = EXCLUDED.zone_id, asset_def_id = EXCLUDED.asset_def_id,
-                       name = EXCLUDED.name, lat = EXCLUDED.lat, lng = EXCLUDED.lng,
-                       x = EXCLUDED.x, y = EXCLUDED.y, rotation = EXCLUDED.rotation,
-                       width = EXCLUDED.width, length = EXCLUDED.length,
-                       metadata = EXCLUDED.metadata, updated_at = CURRENT_TIMESTAMP`,
-                    [
-                        asset.id, id, asset.parentId,
-                        asset.assetDefId || asset.assetDef?.id || asset.id.split('_')[0],
-                        asset.name, asset.lat, asset.lng, asset.x, asset.y,
-                        asset.rotationDeg || asset.rotation || 0,
-                        asset.widthM || asset.width, asset.lengthM || asset.length,
-                        JSON.stringify(asset)
-                    ]
-                );
-            }
-        }
-
-        // ── Upsert lines ──
-        const incomingLineIds = (lines || []).map(l => l.id).filter(Boolean);
-        if (incomingLineIds.length > 0) {
-            await client.query(
-                `DELETE FROM map_lines WHERE map_id = $1 AND id NOT IN (${incomingLineIds.map((_, i) => `$${i + 2}`).join(',')})`,
-                [id, ...incomingLineIds]
-            );
-        } else {
-            await client.query('DELETE FROM map_lines WHERE map_id = $1', [id]);
-        }
-
-        if (lines && lines.length > 0) {
-            for (const line of lines) {
-                await client.query(
-                    `INSERT INTO map_lines (id, map_id, parentId, name, path, color, weight, pattern)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                     ON CONFLICT (id) DO UPDATE SET
-                       parentId = EXCLUDED.parentId, name = EXCLUDED.name,
-                       path = EXCLUDED.path, color = EXCLUDED.color,
-                       weight = EXCLUDED.weight, pattern = EXCLUDED.pattern`,
-                    [line.id, id, line.parentId, line.name, JSON.stringify(line.path), line.color, line.weight || 4, line.pattern]
-                );
-            }
-        }
-
-        // ── Upsert annotations ──
-        const incomingAnnIds = (annotations || []).map(a => a.id).filter(Boolean);
-        if (incomingAnnIds.length > 0) {
-            await client.query(
-                `DELETE FROM map_annotations WHERE map_id = $1 AND id NOT IN (${incomingAnnIds.map((_, i) => `$${i + 2}`).join(',')})`,
-                [id, ...incomingAnnIds]
-            );
-        } else {
-            await client.query('DELETE FROM map_annotations WHERE map_id = $1', [id]);
-        }
-
-        if (annotations && annotations.length > 0) {
-            for (const ann of annotations) {
-                await client.query(
-                    `INSERT INTO map_annotations (id, map_id, parentId, text, lat, lng, style)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                     ON CONFLICT (id) DO UPDATE SET
-                       parentId = EXCLUDED.parentId, text = EXCLUDED.text,
-                       lat = EXCLUDED.lat, lng = EXCLUDED.lng, style = EXCLUDED.style`,
-                    [ann.id, id, ann.parentId, ann.text, ann.lat, ann.lng, JSON.stringify(ann.style || {})]
-                );
-            }
         }
 
         await client.query('COMMIT');
@@ -243,6 +105,25 @@ exports.getMap = async (req, res) => {
         }
 
         const map = mapRes.rows[0];
+
+        // If map_data exists, use it as the primary source
+        if (map.map_data) {
+            const mapData = typeof map.map_data === 'string' ? JSON.parse(map.map_data) : map.map_data;
+            return res.json({
+                success: true,
+                ...map,
+                eventType: map.event_type,
+                center: { lat: parseFloat(map.center_lat), lng: parseFloat(map.center_lng) },
+                layers: map.layers || {},
+                settings: map.settings || {},
+                zones: mapData.zones || [],
+                assets: mapData.assets || [],
+                lines: mapData.lines || [],
+                annotations: mapData.annotations || []
+            });
+        }
+
+        // Fallback to old multi-table logic for backward compatibility (in case migration missed something)
         const zonesRes = await db.query(`
             SELECT z.*, t.name as type_name, t.color as type_color, t.layout_type, t.capacity_label, t.capacity_unit, t.allowed_asset_types, t.sub_types
             FROM zones z
@@ -250,7 +131,6 @@ exports.getMap = async (req, res) => {
             WHERE map_id = $1
         `, [id]);
 
-        // Join with asset_definitions to get icons/colors/etc.
         const assetsRes = await db.query(`
             SELECT a.*, d.name as def_name, d.icon, d.color, d.default_width, d.default_length
             FROM map_assets a
@@ -279,7 +159,6 @@ exports.getMap = async (req, res) => {
             metadata: z.metadata || {}
         }));
 
-        // Map assets to frontend format (including assetDef hydration)
         const assets = assetsRes.rows.map(a => ({
             ...a,
             type: 'asset',
@@ -303,15 +182,13 @@ exports.getMap = async (req, res) => {
             metadata: a.metadata || {}
         }));
 
-        // Map lines
         const lines = linesRes.rows.map(l => ({
             ...l,
             type: 'line',
-            parentId: l.parentid, // pg might lower case columns if not quoted
+            parentId: l.parentid,
             weight: parseInt(l.weight) || 4
         }));
 
-        // Map annotations
         const annotations = annotationsRes.rows.map(ann => ({
             ...ann,
             type: 'annotation',
