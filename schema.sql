@@ -148,6 +148,8 @@ CREATE TABLE IF NOT EXISTS maps (
     layers JSONB,
     settings JSONB,
     map_data JSONB, -- Consolidated map data (zones, assets, lines, annotations)
+    event_date DATE,
+    event_location VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -225,12 +227,28 @@ BEGIN
     -- Sync maps table for layers/settings
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='layers') THEN
         ALTER TABLE maps ADD COLUMN layers JSONB;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='settings') THEN
         ALTER TABLE maps ADD COLUMN settings JSONB;
     END IF;
 
     -- Sync maps table for uploaded image url
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='image_url') THEN
         ALTER TABLE maps ADD COLUMN image_url TEXT;
+    END IF;
+
+    -- Sync maps table for consolidated map payload and event metadata
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='map_data') THEN
+        ALTER TABLE maps ADD COLUMN map_data JSONB;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='event_date') THEN
+        ALTER TABLE maps ADD COLUMN event_date DATE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='event_location') THEN
+        ALTER TABLE maps ADD COLUMN event_location VARCHAR(255);
     END IF;
     
     -- Sync zones table for metadata

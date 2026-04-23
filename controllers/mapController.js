@@ -16,7 +16,9 @@ exports.saveMap = async (req, res) => {
         assets,
         lines,
         annotations,
-        floorPlans   // ✅ ADDED
+        floorPlans,
+        eventDate,
+        eventLocation
     } = req.body;
 
     const client = await db.pool.connect();
@@ -24,13 +26,13 @@ exports.saveMap = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // ✅ include floorPlans
+        // ✅ include floorPlans with defaults
         const mapData = {
-            zones,
-            assets,
-            lines,
-            annotations,
-            floorPlans
+            zones: Array.isArray(zones) ? zones : [],
+            assets: Array.isArray(assets) ? assets : [],
+            lines: Array.isArray(lines) ? lines : [],
+            annotations: Array.isArray(annotations) ? annotations : [],
+            floorPlans: Array.isArray(floorPlans) ? floorPlans : []
         };
 
         const mapRes = await client.query(
@@ -46,23 +48,27 @@ exports.saveMap = async (req, res) => {
                 grid_size,
                 layers,
                 settings,
-                map_data
+                map_data,
+                event_date,
+                event_location
             )
             VALUES 
-            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             RETURNING id`,
             [
                 name || 'Untitled Map',
                 eventType || 'festival',
-                center_lat || 0,
-                center_lng || 0,
-                Math.round(zoom || 14),
+                Number(center_lat) || 0,
+                Number(center_lng) || 0,
+                Math.round(Number(zoom) || 14),
                 measurementUnit || 'meters',
-                grid_enabled || false,
-                grid_size || 10,
+                Boolean(grid_enabled),
+                Number(grid_size) || 10,
                 JSON.stringify(layers || {}),
                 JSON.stringify(settings || {}),
-                JSON.stringify(mapData)
+                JSON.stringify(mapData),
+                eventDate || null,
+                eventLocation || null
             ]
         );
 
@@ -112,7 +118,9 @@ exports.updateMap = async (req, res) => {
         assets,
         lines,
         annotations,
-        floorPlans   // ✅ ADDED
+        floorPlans,   // ✅ ADDED
+        eventDate,
+        eventLocation
     } = req.body;
 
     const client = await db.pool.connect();
@@ -143,8 +151,10 @@ exports.updateMap = async (req, res) => {
                 layers = $9,
                 settings = $10,
                 map_data = $11,
+                event_date = $12,
+                event_location = $13,
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $12`,
+             WHERE id = $14`,
             [
                 name,
                 eventType || 'festival',
@@ -157,6 +167,8 @@ exports.updateMap = async (req, res) => {
                 JSON.stringify(layers || {}),
                 JSON.stringify(settings || {}),
                 JSON.stringify(mapData),
+                eventDate || null,
+                eventLocation || null,
                 id
             ]
         );
