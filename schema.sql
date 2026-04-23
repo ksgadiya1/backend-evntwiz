@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- (existing tables...)
 CREATE TABLE IF NOT EXISTS asset_categories (
     id VARCHAR(50) PRIMARY KEY,
@@ -136,6 +138,7 @@ CREATE TABLE IF NOT EXISTS maps (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     event_type VARCHAR(100) DEFAULT 'festival',
+    image_url TEXT,
     center_lat DECIMAL(10, 8) NOT NULL,
     center_lng DECIMAL(11, 8) NOT NULL,
     zoom INTEGER NOT NULL,
@@ -223,6 +226,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='layers') THEN
         ALTER TABLE maps ADD COLUMN layers JSONB;
         ALTER TABLE maps ADD COLUMN settings JSONB;
+    END IF;
+
+    -- Sync maps table for uploaded image url
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='maps' AND column_name='image_url') THEN
+        ALTER TABLE maps ADD COLUMN image_url TEXT;
     END IF;
     
     -- Sync zones table for metadata
